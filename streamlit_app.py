@@ -55,6 +55,8 @@ if "session_id" not in st.session_state:
     st.session_state.topic_index = 0
     st.session_state.messages = {topic: [] for topic in TOPICS}
     st.session_state.force_next_prompt = False
+    st.session_state.awaiting_reply = False
+    st.session_state.last_user_input = ""
 
 current_topic = TOPICS[st.session_state.topic_index]
 
@@ -103,19 +105,17 @@ if not st.session_state.messages[current_topic]:
     st.session_state.messages[current_topic].append({"role": "assistant", "content": initial_prompt})
     st.rerun()
 
-# --- CHAT INPUT ---
-user_input = st.chat_input("Your response")
-
-if user_input:
-    st.session_state.messages[current_topic].append({"role": "user", "content": user_input})
+# --- HANDLE GPT RESPONSE ---
+if st.session_state.awaiting_reply and st.session_state.last_user_input:
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             reply = chat_with_gpt(st.session_state.messages[current_topic], current_topic)
     st.session_state.messages[current_topic].append({"role": "assistant", "content": reply})
+    st.session_state.awaiting_reply = False
+    st.session_state.last_user_input = ""
 
     if "let's move on" in reply.lower():
         st.session_state.topic_index += 1
-
         if st.session_state.topic_index >= len(TOPICS):
             filename = f"transcript_{st.session_state.session_id}.json"
             data = {
@@ -131,4 +131,13 @@ if user_input:
         else:
             next_topic = TOPICS[st.session_state.topic_index]
             st.session_state.messages[next_topic].append({"role": "assistant", "content": BASE_PROMPTS[next_topic]})
-            st.experimental_rerun()
+    st.rerun()
+
+# --- CHAT INPUT ---
+user_input = st.chat_input("Your response")
+
+if user_input:
+    st.session_state.messages[current_topic].append({"role": "user", "content": user_input})
+    st.session_state.last_user_input = user_input
+    st.session_state.awaiting_reply = True
+    st.rerun()
