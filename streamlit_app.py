@@ -1,12 +1,12 @@
 import streamlit as st
-import openai
 import uuid
 import json
 import requests
 from datetime import datetime
+from openai import OpenAI
 
 # --- CONFIG ---
-openai.api_key = st.secrets["OPENAI_API_KEY"]  # Store your OpenAI key in Streamlit secrets
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])  # Updated OpenAI client for v1+
 DROPBOX_TOKEN = st.secrets["DROPBOX_TOKEN"]     # Store your Dropbox token in Streamlit secrets
 
 TOPICS = [
@@ -61,12 +61,12 @@ current_topic = TOPICS[st.session_state.topic_index]
 def chat_with_gpt(topic_history, topic):
     messages = [{"role": "system", "content": f"You are an interview bot assessing a candidate's {topic} skills. Ask thoughtful, follow-up questions, and when you're satisfied, say 'Thank you, let's move on.'"}]
     messages += topic_history
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=messages,
         temperature=0.7
     )
-    return response["choices"][0]["message"]["content"]
+    return response.choices[0].message.content
 
 # --- DROPBOX UPLOAD ---
 def upload_to_dropbox(json_data, filename="transcript.json"):
