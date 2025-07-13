@@ -100,7 +100,7 @@ for msg in st.session_state.messages[current_topic]:
 if not st.session_state.messages[current_topic]:
     initial_prompt = BASE_PROMPTS[current_topic]
     st.session_state.messages[current_topic].append({"role": "assistant", "content": initial_prompt})
-    st.experimental_rerun()
+    st.rerun()
 
 # --- CHAT INPUT ---
 user_input = st.chat_input("Your response")
@@ -126,4 +126,4 @@ if user_input:
                 st.error("Interview complete, but failed to save transcript to Dropbox.")
             st.stop()
         else:
-            st.experimental_rerun()
+            st.rerun()
