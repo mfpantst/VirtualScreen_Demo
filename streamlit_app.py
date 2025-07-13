@@ -1,56 +1,129 @@
 import streamlit as st
-from openai import OpenAI
+import openai
+import uuid
+import json
+import requests
+from datetime import datetime
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+# --- CONFIG ---
+openai.api_key = st.secrets["OPENAI_API_KEY"]  # Store your OpenAI key in Streamlit secrets
+DROPBOX_TOKEN = st.secrets["DROPBOX_TOKEN"]     # Store your Dropbox token in Streamlit secrets
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.secrets["OPENAI_API_KEY"]
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+TOPICS = [
+    "Problem Solving",
+    "Leadership",
+    "Strategic Thinking",
+    "Work Ethic",
+    "Communication"
+]
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+BASE_PROMPTS = {
+    "Problem Solving": "Tell me about a time you were faced with a complex or unfamiliar problem. How did you approach solving it, and what was the result?",
+    "Leadership": "Describe a situation where you took initiative or led a group, even if it wasn’t in a formal leadership role. What was the outcome?",
+    "Strategic Thinking": "Tell me about a time you had to make a decision that required thinking beyond the immediate task. How did you consider the bigger picture?",
+    "Work Ethic": "Give an example of a time you had to push through a difficult challenge or long hours to get something done. What motivated you?",
+    "Communication": "Tell me about a time when you had to explain something complex to someone with less knowledge of the topic. How did you do it?"
+}
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+# --- CHECK INTERVIEW LIMIT ---
+def has_reached_limit():
+    headers = {
+        "Authorization": f"Bearer {DROPBOX_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "path": "/interview_transcripts"
+    }
+    response = requests.post("https://api.dropboxapi.com/2/files/list_folder", headers=headers, json=data)
+    if response.status_code == 200:
+        entries = response.json().get("entries", [])
+        transcript_files = [f for f in entries if f['.tag'] == 'file' and f['name'].startswith("transcript_")]
+        return len(transcript_files) >= 10000
+    else:
+        st.error("Unable to verify interview count from Dropbox.")
+        return True
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+if has_reached_limit():
+    st.title("Interview Limit Reached")
+    st.error("The application has reached its maximum of 10,000 interviews and is now shut down.")
+    st.stop()
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+# --- SESSION STATE ---
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+    st.session_state.topic_index = 0
+    st.session_state.messages = {topic: [] for topic in TOPICS}
+    st.session_state.in_topic = True
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+current_topic = TOPICS[st.session_state.topic_index]
 
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
+# --- GPT UTILITY ---
+def chat_with_gpt(topic_history, topic):
+    messages = [{"role": "system", "content": f"You are an interview bot assessing a candidate's {topic} skills. Ask thoughtful, follow-up questions, and when you're satisfied, say 'Thank you, let's move on.'"}]
+    messages += topic_history
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=messages,
+        temperature=0.7
+    )
+    return response["choices"][0]["message"]["content"]
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+# --- DROPBOX UPLOAD ---
+def upload_to_dropbox(json_data, filename="transcript.json"):
+    dropbox_path = f"/interview_transcripts/{filename}"
+    headers = {
+        "Authorization": f"Bearer {DROPBOX_TOKEN}",
+        "Content-Type": "application/octet-stream",
+        "Dropbox-API-Arg": json.dumps({
+            "path": dropbox_path,
+            "mode": "add",
+            "autorename": True,
+            "mute": False
+        })
+    }
+    response = requests.post(
+        "https://content.dropboxapi.com/2/files/upload",
+        headers=headers,
+        data=json.dumps(json_data).encode("utf-8")
+    )
+    return response.status_code == 200
+
+# --- RENDER CHAT ---
+st.title("AI Interview Screener")
+st.write(f"### Topic: {current_topic}")
+
+for msg in st.session_state.messages[current_topic]:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# --- INITIAL PROMPT ---
+if not st.session_state.messages[current_topic]:
+    initial_prompt = BASE_PROMPTS[current_topic]
+    st.session_state.messages[current_topic].append({"role": "assistant", "content": initial_prompt})
+    st.experimental_rerun()
+
+# --- CHAT INPUT ---
+user_input = st.chat_input("Your response")
+
+if user_input:
+    st.session_state.messages[current_topic].append({"role": "user", "content": user_input})
+    reply = chat_with_gpt(st.session_state.messages[current_topic], current_topic)
+    st.session_state.messages[current_topic].append({"role": "assistant", "content": reply})
+
+    if "let's move on" in reply.lower():
+        st.session_state.topic_index += 1
+        if st.session_state.topic_index >= len(TOPICS):
+            # --- SAVE TRANSCRIPT TO DROPBOX ---
+            filename = f"transcript_{st.session_state.session_id}.json"
+            data = {
+                "session_id": st.session_state.session_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "transcript": st.session_state.messages
+            }
+            if upload_to_dropbox(data, filename):
+                st.success("Interview complete. Transcript saved to Dropbox. Thank you!")
+            else:
+                st.error("Interview complete, but failed to save transcript to Dropbox.")
+            st.stop()
+        else:
+            st.experimental_rerun()
