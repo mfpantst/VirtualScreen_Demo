@@ -148,4 +148,5 @@ elif st.session_state.awaiting_response and st.session_state.response_started:
                 st.error("Interview complete, but failed to save transcript to Dropbox.")
             st.stop()
         else:
+            st.experimental_sleep(0.5)
             st.rerun()
