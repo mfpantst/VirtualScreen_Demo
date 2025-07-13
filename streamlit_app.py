@@ -55,6 +55,8 @@ if "session_id" not in st.session_state:
     st.session_state.messages = {topic: [] for topic in TOPICS}
     st.session_state.in_topic = True
     st.session_state.pending_user_input = None
+    st.session_state.awaiting_response = False
+    st.session_state.response_started = False
 
 current_topic = TOPICS[st.session_state.topic_index]
 
@@ -97,6 +99,11 @@ for msg in st.session_state.messages[current_topic]:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
+if st.session_state.awaiting_response:
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            pass
+
 # --- INITIAL PROMPT ---
 if not st.session_state.messages[current_topic]:
     initial_prompt = BASE_PROMPTS[current_topic]
@@ -109,13 +116,21 @@ user_input = st.chat_input("Your response")
 if user_input:
     st.session_state.messages[current_topic].append({"role": "user", "content": user_input})
     st.session_state.pending_user_input = user_input
+    st.session_state.awaiting_response = True
+    st.session_state.response_started = False
     st.rerun()
 
-# --- GENERATE AI RESPONSE IF NEEDED ---
-if st.session_state.pending_user_input:
+# --- DELAYED AI RESPONSE TO ALLOW UI REFRESH ---
+if st.session_state.awaiting_response and not st.session_state.response_started:
+    st.session_state.response_started = True
+    st.rerun()
+
+elif st.session_state.awaiting_response and st.session_state.response_started:
     reply = chat_with_gpt(st.session_state.messages[current_topic], current_topic)
     st.session_state.messages[current_topic].append({"role": "assistant", "content": reply})
     st.session_state.pending_user_input = None
+    st.session_state.awaiting_response = False
+    st.session_state.response_started = False
 
     if "let's move on" in reply.lower():
         st.session_state.topic_index += 1
