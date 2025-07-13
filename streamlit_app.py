@@ -4,10 +4,11 @@ import json
 import requests
 from datetime import datetime
 from openai import OpenAI
+import time
 
 # --- CONFIG ---
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])  # Updated OpenAI client for v1+
-DROPBOX_TOKEN = st.secrets["DROPBOX_TOKEN"]     # Store your Dropbox token in Streamlit secrets
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+DROPBOX_TOKEN = st.secrets["DROPBOX_TOKEN"]
 
 TOPICS = [
     "Problem Solving",
@@ -53,10 +54,7 @@ if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
     st.session_state.topic_index = 0
     st.session_state.messages = {topic: [] for topic in TOPICS}
-    st.session_state.in_topic = True
-    st.session_state.pending_user_input = None
-    st.session_state.awaiting_response = False
-    st.session_state.response_started = False
+    st.session_state.force_next_prompt = False
 
 current_topic = TOPICS[st.session_state.topic_index]
 
@@ -99,11 +97,6 @@ for msg in st.session_state.messages[current_topic]:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if st.session_state.awaiting_response:
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            pass
-
 # --- INITIAL PROMPT ---
 if not st.session_state.messages[current_topic]:
     initial_prompt = BASE_PROMPTS[current_topic]
@@ -115,27 +108,15 @@ user_input = st.chat_input("Your response")
 
 if user_input:
     st.session_state.messages[current_topic].append({"role": "user", "content": user_input})
-    st.session_state.pending_user_input = user_input
-    st.session_state.awaiting_response = True
-    st.session_state.response_started = False
-    st.rerun()
-
-# --- DELAYED AI RESPONSE TO ALLOW UI REFRESH ---
-if st.session_state.awaiting_response and not st.session_state.response_started:
-    st.session_state.response_started = True
-    st.rerun()
-
-elif st.session_state.awaiting_response and st.session_state.response_started:
-    reply = chat_with_gpt(st.session_state.messages[current_topic], current_topic)
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            reply = chat_with_gpt(st.session_state.messages[current_topic], current_topic)
     st.session_state.messages[current_topic].append({"role": "assistant", "content": reply})
-    st.session_state.pending_user_input = None
-    st.session_state.awaiting_response = False
-    st.session_state.response_started = False
 
     if "let's move on" in reply.lower():
         st.session_state.topic_index += 1
+
         if st.session_state.topic_index >= len(TOPICS):
-            # --- SAVE TRANSCRIPT TO DROPBOX ---
             filename = f"transcript_{st.session_state.session_id}.json"
             data = {
                 "session_id": st.session_state.session_id,
@@ -148,5 +129,6 @@ elif st.session_state.awaiting_response and st.session_state.response_started:
                 st.error("Interview complete, but failed to save transcript to Dropbox.")
             st.stop()
         else:
-            st.experimental_sleep(0.5)
-            st.rerun()
+            next_topic = TOPICS[st.session_state.topic_index]
+            st.session_state.messages[next_topic].append({"role": "assistant", "content": BASE_PROMPTS[next_topic]})
+            st.experimental_rerun()
