@@ -54,6 +54,7 @@ if "session_id" not in st.session_state:
     st.session_state.topic_index = 0
     st.session_state.messages = {topic: [] for topic in TOPICS}
     st.session_state.in_topic = True
+    st.session_state.pending_user_input = None
 
 current_topic = TOPICS[st.session_state.topic_index]
 
@@ -107,8 +108,14 @@ user_input = st.chat_input("Your response")
 
 if user_input:
     st.session_state.messages[current_topic].append({"role": "user", "content": user_input})
+    st.session_state.pending_user_input = user_input
+    st.rerun()
+
+# --- GENERATE AI RESPONSE IF NEEDED ---
+if st.session_state.pending_user_input:
     reply = chat_with_gpt(st.session_state.messages[current_topic], current_topic)
     st.session_state.messages[current_topic].append({"role": "assistant", "content": reply})
+    st.session_state.pending_user_input = None
 
     if "let's move on" in reply.lower():
         st.session_state.topic_index += 1
