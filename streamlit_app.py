@@ -6,9 +6,35 @@ from datetime import datetime
 from openai import OpenAI
 import time
 
+# Config 2.0
 # --- CONFIG ---
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-DROPBOX_TOKEN = st.secrets["DROPBOX_TOKEN"]
+DROPBOX_FOLDER = "/transcripts"
+
+APP_KEY = st.secrets["DROPBOX_APP_KEY"]
+APP_SECRET = st.secrets["DROPBOX_APP_SECRET"]
+REFRESH_TOKEN = st.secrets["DROPBOX_REFRESH_TOKEN"]
+
+# --- TOKEN REFRESH ---
+def get_fresh_dropbox_token():
+    response = requests.post(
+        "https://api.dropboxapi.com/oauth2/token",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": REFRESH_TOKEN
+        },
+        auth=(APP_KEY, APP_SECRET)
+    )
+    response.raise_for_status()
+    return response.json()["access_token"]
+
+# --- GET ACCESS TOKEN ---
+DROPBOX_TOKEN = get_fresh_dropbox_token()
+
+#Old Config, Revert to if needed but just static token
+# --- CONFIG ---
+#client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+#DROPBOX_TOKEN = st.secrets["DROPBOX_TOKEN"]
 
 TOPICS = [
     "Problem Solving",
@@ -73,6 +99,7 @@ def chat_with_gpt(topic_history, topic):
 
 # --- DROPBOX UPLOAD ---
 def upload_to_dropbox(json_data, filename="transcript.json"):
+    DROPBOX_TOKEN=get_fresh_dropbox_token()
     dropbox_path = f"/interview_transcripts/{filename}"
     headers = {
         "Authorization": f"Bearer {DROPBOX_TOKEN}",
